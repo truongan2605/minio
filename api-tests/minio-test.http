@@ -1,0 +1,42 @@
+### MinIO API Test — dùng với VS Code REST Client extension
+### Base URL: https://uninsured-voting-neatly.ngrok-free.dev
+### Hoặc local: http://localhost:9000
+
+@baseUrl = https://uninsured-voting-neatly.ngrok-free.dev
+@localUrl = http://localhost:9000
+
+# ─────────────────────────────────────────
+# 1. Health Check — không cần auth
+# ─────────────────────────────────────────
+
+### MinIO Health Check
+GET {{baseUrl}}/minio/health/live
+
+### MinIO Readiness Check
+GET {{baseUrl}}/minio/health/ready
+
+# ─────────────────────────────────────────
+# 2. List Buckets — cần auth (SigV4)
+#    Dùng mc hoặc AWS SDK thay vì raw HTTP
+#    vì SigV4 phức tạp để ký tay
+# ─────────────────────────────────────────
+
+### List Buckets — thử anonymous (sẽ 403 nếu private)
+GET {{baseUrl}}/
+
+### Download file public (không cần auth nếu bucket public)
+GET {{baseUrl}}/public-files/ten-file-cua-ban.txt
+
+### Download file từ avatars bucket (public)
+GET {{baseUrl}}/avatars/ten-file.jpg
+
+# ─────────────────────────────────────────
+# 3. Upload file public — PUT (cần SigV4)
+#    Test bằng mc CLI dễ hơn
+# ─────────────────────────────────────────
+
+### Upload test (sẽ trả 403 vì chưa có SigV4 auth)
+PUT {{baseUrl}}/public-files/hello.txt
+Content-Type: text/plain
+
+Hello from MinIO test!

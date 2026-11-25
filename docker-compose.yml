@@ -1,0 +1,163 @@
+services:
+  # ─────────────────────────────────────────────
+  # MinIO - Zone 1
+  # ─────────────────────────────────────────────
+  minio1:
+    image: minio/minio:latest
+    container_name: minio1
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API endpoint
+      - "9001:9001"   # Web Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: "zone-1"
+    volumes:
+      - minio1_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - storage_net
+
+  # ─────────────────────────────────────────────
+  # MinIO - Zone 2
+  # ─────────────────────────────────────────────
+  minio2:
+    image: minio/minio:latest
+    container_name: minio2
+    restart: unless-stopped
+    ports:
+      - "9002:9000"   # S3 API endpoint
+      - "9003:9001"   # Web Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SITE_NAME: "zone-2"
+    volumes:
+      - minio2_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - storage_net
+
+  # ─────────────────────────────────────────────
+  # MinIO Init — tự động tạo buckets & policies cho cả 2 zone
+  # ─────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio1:
+        condition: service_healthy
+      minio2:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+      echo '⏳ Waiting for MinIO 1 and 2...';
+      sleep 3;
+      mc alias set local1 http://minio1:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc alias set local2 http://minio2:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      echo '✅ MinIO 1 & 2 connected';
+
+      mc mb --ignore-existing local1/public-files;
+      mc mb --ignore-existing local1/private-files;
+      mc mb --ignore-existing local1/avatars;
+
+      mc mb --ignore-existing local2/public-files;
+      mc mb --ignore-existing local2/private-files;
+      mc mb --ignore-existing local2/avatars;
+      echo '✅ Buckets created in both zones: public-files, private-files, avatars';
+
+      mc anonymous set download local1/public-files;
+      mc anonymous set download local1/avatars;
+      
+      mc anonymous set download local2/public-files;
+      mc anonymous set download local2/avatars;
+      echo '✅ Public policy set for public-files and avatars in both zones';
+
+      echo '🎉 MinIO init completed!';
+      "
+    networks:
+      - storage_net
+
+  # ─────────────────────────────────────────────
+  # Ngrok - Expose Zone 1 API
+  # ─────────────────────────────────────────────
+  ngrok1:
+    image: ngrok/ngrok:latest
+    container_name: ngrok1
+    restart: unless-stopped
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN_1}
+    command: http --domain=${NGROK_DOMAIN_1} minio1:9000
+    ports:
+      - "4040:4040"
+    networks:
+      - storage_net
+
+  # ─────────────────────────────────────────────
+  # Ngrok - Expose Zone 2 API
+  # ─────────────────────────────────────────────
+  ngrok2:
+    image: ngrok/ngrok:latest
+    container_name: ngrok2
+    restart: unless-stopped
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN_2}
+    command: http --domain=${NGROK_DOMAIN_2} minio2:9000
+    ports:
+      - "4041:4040"
+    networks:
+      - storage_net
+
+  # ─────────────────────────────────────────────
+  # MySQL — lưu metadata user, file info, v.v.
+  # ─────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - storage_net
+
+# ─────────────────────────────────────────────
+# Volumes & Networks
+# ─────────────────────────────────────────────
+volumes:
+  minio1_data:
+    driver: local
+  minio2_data:
+    driver: local
+  mysql_data:
+    driver: local
+
+networks:
+  storage_net:
+    driver: bridge

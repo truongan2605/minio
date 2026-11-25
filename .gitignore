@@ -1,0 +1,16 @@
+# Environment variables (contains real secrets/tokens)
+.env
+.env.local
+.env.*.local
+
+# Large binaries / archives
+*.zip
+ngrok.exe
+ngrok
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
